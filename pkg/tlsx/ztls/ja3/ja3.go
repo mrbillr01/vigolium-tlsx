@@ -2,6 +2,7 @@ package ja3
 
 import (
 	"crypto/md5"
+	"encoding/binary"
 	"encoding/hex"
 	"strconv"
 
@@ -60,10 +61,6 @@ func GetJa3Hash(clientHello *tls.ClientHello) string {
 		byteString = appendExtension(byteString, extensionServerName)
 	}
 
-	if clientHello.NextProtoNeg {
-		byteString = appendExtension(byteString, extensionNextProtoNeg)
-	}
-
 	if clientHello.OcspStapling {
 		byteString = appendExtension(byteString, extensionStatusRequest)
 	}
@@ -108,12 +105,7 @@ func GetJa3Hash(clientHello *tls.ClientHello) string {
 		byteString = appendExtension(byteString, extensionSCT)
 	}
 
-	if len(clientHello.UnknownExtensions) > 0 {
-		for _, ext := range clientHello.UnknownExtensions {
-			exType := uint16(ext[0])<<8 | uint16(ext[1])
-			byteString = appendExtension(byteString, exType)
-		}
-	}
+	byteString = appendUnknownExtensions(byteString, clientHello.UnknownExtensions)
 	// If dash found replace it with a comma
 	if byteString[len(byteString)-1] == dashByte {
 		byteString[len(byteString)-1] = commaByte
@@ -172,10 +164,6 @@ func GetJa3sHash(serverHello *tls.ServerHello) string {
 	}
 
 	// Extensions
-	if serverHello.NextProtoNeg {
-		byteString = appendExtension(byteString, extensionNextProtoNeg)
-	}
-
 	if serverHello.OcspStapling {
 		byteString = appendExtension(byteString, extensionStatusRequest)
 	}
@@ -200,18 +188,10 @@ func GetJa3sHash(serverHello *tls.ServerHello) string {
 		byteString = appendExtension(byteString, extensionExtendedMasterSecret)
 	}
 
-	if len(serverHello.UnknownExtensions) > 0 {
-		for _, ext := range serverHello.UnknownExtensions {
-			exType := uint16(ext[0])<<8 | uint16(ext[1])
-			byteString = appendExtension(byteString, exType)
-		}
-	}
+	byteString = appendUnknownExtensions(byteString, serverHello.UnknownExtensions)
 	// If dash found replace it with a comma
 	if byteString[len(byteString)-1] == dashByte {
-		byteString[len(byteString)-1] = commaByte
-	} else {
-		// else add a comma (no extension present)
-		byteString = append(byteString, commaByte)
+		byteString = byteString[:len(byteString)-1]
 	}
 
 	h := md5.Sum(byteString)
@@ -225,4 +205,14 @@ func appendExtension(byteString []byte, exType uint16) []byte {
 		byteString = append(byteString, dashByte)
 	}
 	return byteString
+}
+
+// zcrypto retains retired extensions as their complete wire encoding.
+func appendUnknownExtensions(out []byte, extensions [][]byte) []byte {
+	for _, extension := range extensions {
+		if len(extension) >= 4 && int(binary.BigEndian.Uint16(extension[2:4])) == len(extension)-4 {
+			out = appendExtension(out, binary.BigEndian.Uint16(extension[:2]))
+		}
+	}
+	return out
 }

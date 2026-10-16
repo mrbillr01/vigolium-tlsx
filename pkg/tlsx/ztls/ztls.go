@@ -27,6 +27,8 @@ import (
 	"github.com/zmap/zcrypto/x509"
 )
 
+var errCertsOnly = errors.New("ztls: requested certificates collected")
+
 func init() {
 	asn1.AllowPermissiveParsing = true
 }
@@ -65,6 +67,12 @@ func New(options *clients.Options) (*Client, error) {
 			InsecureSkipVerify: !options.VerifyServerCertificate,
 		},
 		options: options,
+	}
+
+	if options.CertsOnly {
+		c.tlsConfig.VerifyPeerCertificate = func(_ [][]byte, _ []x509.CertificateChain) error {
+			return errCertsOnly
+		}
 	}
 
 	if len(options.Ciphers) > 0 {
@@ -289,7 +297,7 @@ func (c *Client) EnumerateCiphers(hostname, ip, port string, options clients.Con
 			_ = baseConn.Close()
 			<-errChan
 		case err := <-errChan:
-			if err == nil || err == tls.ErrCertsOnly {
+			if err == nil || err == errCertsOnly {
 				hl := tlsConn.GetHandshakeLog()
 				if hl != nil && hl.ServerHello != nil {
 					mu.Lock()
@@ -393,7 +401,7 @@ func (c *Client) tlsHandshakeWithTimeout(tlsConn *tls.Conn, rawConn net.Conn, ct
 		<-errChan
 		return errorutil.NewWithTag("ztls", "timeout while attempting handshake").Wrap(ctx.Err()) //nolint
 	case err := <-errChan:
-		if err == tls.ErrCertsOnly {
+		if err == errCertsOnly {
 			err = nil
 		}
 		return err
